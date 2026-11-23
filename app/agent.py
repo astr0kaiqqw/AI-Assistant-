@@ -3,7 +3,14 @@ from contextlib import contextmanager
 
 from dotenv import load_dotenv
 from openai import OpenAI
-from openai.types.chat import ChatCompletion
+from openai.types.chat import ChatCompletion, ChatCompletionMessageFunctionToolCall
+
+from app.tools import TOOL_DEFINITIONS, execute_tool
+
+
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+MAX_TOOL_ROUNDS = 3
 
 
 class InvalidProviderResponse(Exception):
@@ -16,6 +23,12 @@ def llm_client():
     api_key = os.getenv("LLM_API_KEY", "").strip()
     base_url = os.getenv("LLM_BASE_URL", "").strip()
     model = os.getenv("LLM_MODEL", "").strip()
+
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if api_key:
+            base_url = GEMINI_BASE_URL
+            model = os.getenv("GEMINI_MODEL", "").strip() or model or DEFAULT_GEMINI_MODEL
 
     if not (api_key and base_url and model):
         yield None, model
@@ -31,20 +44,55 @@ def llm_client():
 
 
 def ask_agent(message: str, client: OpenAI, model: str) -> str:
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": message}],
-        )
-    except ValueError:
-        raise InvalidProviderResponse from None
+    messages = [{"role": "user", "content": message}]
 
-    choices = getattr(response, "choices", None)
-    if not isinstance(response, ChatCompletion) or not isinstance(choices, list) or not choices:
-        raise InvalidProviderResponse
+    for round_number in range(MAX_TOOL_ROUNDS + 1):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=TOOL_DEFINITIONS,
+                tool_choice="auto" if round_number < MAX_TOOL_ROUNDS else "none",
+            )
+        except ValueError:
+            raise InvalidProviderResponse from None
 
-    reply = getattr(choices[0], "message", None)
-    content = getattr(reply, "content", None)
-    if not isinstance(content, str) or not content.strip():
-        raise InvalidProviderResponse
-    return content
+        choices = getattr(response, "choices", None)
+        if not isinstance(response, ChatCompletion) or not isinstance(choices, list) or not choices:
+            raise InvalidProviderResponse
+
+        reply = getattr(choices[0], "message", None)
+        calls = getattr(reply, "tool_calls", None)
+        if not calls:
+            content = getattr(reply, "content", None)
+            if not isinstance(content, str) or not content.strip():
+                raise InvalidProviderResponse
+            return content
+
+        if round_number == MAX_TOOL_ROUNDS or not isinstance(calls, list):
+            raise InvalidProviderResponse
+
+        for call in calls:
+            if (
+                not isinstance(call, ChatCompletionMessageFunctionToolCall)
+                or not isinstance(call.id, str)
+                or not call.id
+                or not isinstance(getattr(call.function, "name", None), str)
+                or not isinstance(getattr(call.function, "arguments", None), str)
+            ):
+                raise InvalidProviderResponse
+
+        # Replay the original calls, including Gemini thought signatures when present.
+        messages.append({
+            "role": "assistant",
+            "content": getattr(reply, "content", None),
+            "tool_calls": [call.model_dump(exclude_none=True) for call in calls],
+        })
+        for call in calls:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": execute_tool(call.function.name, call.function.arguments),
+            })
+
+    raise InvalidProviderResponse
