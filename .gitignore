@@ -20,3 +20,9 @@ credentials.json
 *.key
 *.p12
 *.pfx
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*

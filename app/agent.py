@@ -43,8 +43,14 @@ def llm_client():
         yield client, model
 
 
-def ask_agent(message: str, client: OpenAI, model: str) -> str:
-    messages = [{"role": "user", "content": message}]
+def ask_agent(
+    message: str,
+    client: OpenAI,
+    model: str,
+    *,
+    history: list[dict[str, str]] | None = None,
+) -> str:
+    messages = [*(history or []), {"role": "user", "content": message}]
 
     for round_number in range(MAX_TOOL_ROUNDS + 1):
         try:

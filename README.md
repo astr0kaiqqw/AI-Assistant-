@@ -30,6 +30,39 @@ and model must support function calling. If using the model from `.env`
 directly, run `python -m uvicorn app.main:app --reload`. Exported environment
 variables override values from `.env`.
 
+## Conversation memory
+
+Send `{"message": "My name is Mira and I'm studying coral reefs."}` to
+`POST /chat` to start a conversation. The response includes `answer` and a
+UUID `conversation_id`. Pass that ID with your next `message` to continue
+the same conversation. Omit the ID to start a separate conversation.
+
+The app sends the latest 20 saved messages (up to 10 previous turns) to the
+provider in chronological order. After a successful reply, it saves the user
+message and final assistant reply together. Provider failures leave saved
+history intact.
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /conversations` | List conversations by most recent activity. |
+| `GET /conversations/{conversation_id}/messages` | Retrieve the latest page of messages, oldest first within that page. |
+| `DELETE /conversations/{conversation_id}` | Delete the conversation and its messages. Returns HTTP 204. |
+
+Both GET endpoints accept `limit` (1–100, default 50) and `offset` (default
+0). For message history, increase `offset` to page backward from the newest
+messages. Invalid UUIDs return HTTP 422. Unknown conversation IDs return
+HTTP 404.
+
+SQLAlchemy creates `conversations.sqlite3` in the project root on startup.
+The `conversations` table stores UUIDs and UTC creation and update times.
+The `messages` table stores message IDs, conversation IDs, roles, content,
+and UTC creation times. Each conversation can have many messages. The
+database file is ignored by Git. Set `AI_ASSISTANT_DB_PATH` to use a
+different file (use a `.sqlite3` extension to keep it ignored).
+
+**This API is for local single-user use. Do not expose it publicly without
+authentication and conversation ownership checks.**
+
 ## Try tool calling in Swagger
 
 Open [Swagger UI](http://127.0.0.1:8000/docs), expand **POST /chat**, and select
@@ -60,4 +93,5 @@ python -m pip install -r requirements-dev.txt
 python -m unittest discover -s tests -v
 ```
 
-The tests use a mocked provider and require no live credentials.
+The tests use a mocked provider and a temporary SQLite database. They require
+no live credentials.

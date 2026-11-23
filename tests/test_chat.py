@@ -1,7 +1,10 @@
 import json
 import os
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from uuid import UUID
 
 import httpx
 from fastapi.testclient import TestClient
@@ -19,8 +22,13 @@ LLM_ENV = {
 
 class ChatTests(unittest.TestCase):
     def setUp(self):
+        directory = self.enterContext(TemporaryDirectory())
         self.enterContext(patch("app.agent.load_dotenv"))
-        self.enterContext(patch.dict(os.environ, LLM_ENV))
+        self.enterContext(patch.dict(os.environ, {
+            **LLM_ENV,
+            "GEMINI_API_KEY": "",
+            "AI_ASSISTANT_DB_PATH": str(Path(directory) / "test.sqlite3"),
+        }))
 
     def mock_provider(self, handler):
         transport = httpx.MockTransport(handler)
@@ -53,7 +61,9 @@ class ChatTests(unittest.TestCase):
 
         response = self.mock_provider(handler).post("/chat", json={"message": "Hello"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"answer": "Hello there!"})
+        payload = response.json()
+        self.assertEqual(payload["answer"], "Hello there!")
+        self.assertEqual(str(UUID(payload["conversation_id"])), payload["conversation_id"])
 
     def test_provider_timeout(self):
         def handler(request):
