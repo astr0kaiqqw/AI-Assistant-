@@ -14,9 +14,17 @@ class ChatRequest(BaseModel):
     conversation_id: UUID | None = None
 
 
+class ChatUsage(BaseModel):
+    input_tokens: int | None
+    output_tokens: int | None
+    peak_input_tokens: int | None
+    input_token_limit: int | None
+
+
 class ChatResponse(BaseModel):
     answer: str
     conversation_id: UUID
+    usage: ChatUsage | None = None
 
 
 class ConversationResponse(BaseModel):
@@ -25,6 +33,16 @@ class ConversationResponse(BaseModel):
     id: UUID
     created_at: UtcTimestamp
     updated_at: UtcTimestamp
+
+
+class ConversationPreview(ConversationResponse):
+    title: str | None
+
+
+class WorkspaceInfo(BaseModel):
+    model: str | None
+    input_token_limit: int | None
+    tools: list[str]
 
 
 class MessageResponse(BaseModel):

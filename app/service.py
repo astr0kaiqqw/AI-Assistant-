@@ -4,6 +4,7 @@ from openai import OpenAI
 
 from app.agent import ask_agent
 from app.repository import ConversationRepository
+from app.usage import RequestUsage
 
 
 MAX_HISTORY_MESSAGES = 20
@@ -19,6 +20,8 @@ def chat_with_memory(
     repository: ConversationRepository,
     client: OpenAI | None,
     model: str,
+    *,
+    usage: RequestUsage | None = None,
 ) -> tuple[str, UUID]:
     history = []
     if conversation_id is not None:
@@ -27,6 +30,6 @@ def chat_with_memory(
         raise ProviderNotConfigured
 
     context = [{"role": entry.role, "content": entry.content} for entry in history]
-    answer = ask_agent(message, client, model, history=context)
+    answer = ask_agent(message, client, model, history=context, usage=usage)
     conversation_id = repository.save_turn(conversation_id, message, answer)
     return answer, conversation_id

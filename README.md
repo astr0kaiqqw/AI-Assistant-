@@ -30,6 +30,49 @@ and model must support function calling. If using the model from `.env`
 directly, run `python -m uvicorn app.main:app --reload`. Exported environment
 variables override values from `.env`.
 
+## Workspace frontend
+
+Build the React workspace with Node.js 22.12+ or 24 and npm:
+
+```sh
+npm --prefix frontend ci
+npm --prefix frontend run build
+GEMINI_MODEL=gemini-3.1-flash-lite python -m uvicorn app.main:app
+```
+
+Open `http://127.0.0.1:8000/` for the dashboard. For frontend development,
+keep FastAPI running on port 8000 and run `npm --prefix frontend run dev`.
+Vite serves the workspace on port 5173 and proxies API calls to FastAPI.
+When the production build is absent, FastAPI serves the basic chat page.
+
+Dashboard shows the configured model, registered tools, recently updated
+conversations, and the latest reply's usage in the current browser session.
+AI Chat supports Markdown, code, saved conversation switching, and deletion.
+Use Enter to send or Shift+Enter for a new line. Configuration for the model
+stays on the server. Settings lets you choose Dark, Light, or System
+appearance. Documents is marked as planned.
+
+### Context Window monitor
+
+The collapsible monitor appears on Dashboard and next to the chat on wider
+screens. It moves below the chat on narrow screens. When opening a saved
+conversation, usage becomes available after a reply in the current session.
+
+Send a message to see usage for that request. The chat page opts in with
+`POST /chat?include_usage=true`, which adds a `usage` object to the existing
+response. Its input and output totals sum the provider's reported
+`prompt_tokens` and `completion_tokens` across all model calls for the reply.
+The bar compares the largest input count of any one call with the model's
+input token limit. Tool rounds can resend context, so those totals measure
+tokens processed for one reply rather than the size of the conversation.
+
+The configured limit for `gemini-3.1-flash-lite` is 1,048,576 input tokens,
+from [Google's model specification](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite).
+Other models display **Limit unknown** unless their limit is verified in the
+backend. A total displays **Usage unavailable** when any model call in the
+request omits the corresponding count. The API represents missing values
+with `null`.
+
 ## Conversation memory
 
 Send `{"message": "My name is Mira and I'm studying coral reefs."}` to

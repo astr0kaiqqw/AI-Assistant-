@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import Conversation, Message, utc_now
+from app.schemas import ConversationPreview
 
 
 class ConversationNotFound(Exception):
@@ -23,6 +24,29 @@ class ConversationRepository:
         )
         with self.sessions() as session:
             return list(session.scalars(query))
+
+    def list_previews(self, limit: int, offset: int) -> list[ConversationPreview]:
+        title = (
+            select(func.substr(Message.content, 1, 100))
+            .where(Message.conversation_id == Conversation.id, Message.role == "user")
+            .order_by(Message.id)
+            .limit(1)
+            .scalar_subquery()
+        )
+        query = (
+            select(Conversation, title)
+            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        with self.sessions() as session:
+            return [
+                ConversationPreview(
+                    id=conversation.id, created_at=conversation.created_at,
+                    updated_at=conversation.updated_at, title=preview,
+                )
+                for conversation, preview in session.execute(query)
+            ]
 
     def list_messages(
         self, conversation_id: UUID, limit: int, offset: int = 0

@@ -6,6 +6,7 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageFunctionToolCall
 
 from app.tools import TOOL_DEFINITIONS, execute_tool
+from app.usage import RequestUsage
 
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -49,6 +50,7 @@ def ask_agent(
     model: str,
     *,
     history: list[dict[str, str]] | None = None,
+    usage: RequestUsage | None = None,
 ) -> str:
     messages = [*(history or []), {"role": "user", "content": message}]
 
@@ -66,6 +68,8 @@ def ask_agent(
         choices = getattr(response, "choices", None)
         if not isinstance(response, ChatCompletion) or not isinstance(choices, list) or not choices:
             raise InvalidProviderResponse
+        if usage is not None:
+            usage.record(response)
 
         reply = getattr(choices[0], "message", None)
         calls = getattr(reply, "tool_calls", None)

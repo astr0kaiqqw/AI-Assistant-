@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>AI Assistant</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/chat.js"></script>
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <h1>AI Assistant</h1>
+      <button id="new-chat" type="button">New chat</button>
+    </header>
+    <div class="workspace">
+      <section class="chat" aria-label="Chat">
+        <div id="transcript" role="log" aria-label="Conversation" tabindex="0"></div>
+        <form id="composer">
+          <label for="message">Message</label>
+          <textarea id="message" name="message" rows="3" required></textarea>
+          <div class="composer-actions">
+            <p id="chat-status" role="status"></p>
+            <button id="send" type="submit">Send</button>
+          </div>
+        </form>
+      </section>
+      <details id="context-window" class="monitor" open>
+        <summary>
+          <span>Context Window</span>
+          <span id="usage-scope">Last request</span>
+        </summary>
+        <div class="monitor-body" aria-labelledby="usage-scope">
+          <div class="context-summary" aria-live="polite" aria-atomic="true">
+            <p id="context-peak">Usage unavailable</p>
+            <p id="context-limit">Limit unknown</p>
+          </div>
+          <div id="context-meter" class="context-meter" role="meter"
+               aria-label="Peak input context used on the last request" aria-valuemin="0" hidden>
+            <span id="context-used"></span>
+            <span id="context-remaining"></span>
+          </div>
+          <div id="context-breakdown" class="context-breakdown" hidden>
+            <span id="used-percent"></span>
+            <span id="remaining-percent"></span>
+          </div>
+          <dl class="token-totals">
+            <div><dt>Total input tokens</dt><dd id="total-input">Usage unavailable</dd></div>
+            <div><dt>Total output tokens</dt><dd id="total-output">Usage unavailable</dd></div>
+          </dl>
+          <p class="scope-note">Totals cover all model calls for the last reply. The bar shows the largest input of any one call.</p>
+        </div>
+      </details>
+    </div>
+  </main>
+</body>
+</html>

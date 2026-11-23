@@ -26,3 +26,5 @@ credentials.json
 *.sqlite-*
 *.sqlite3
 *.sqlite3-*
+/frontend/node_modules/
+/frontend/dist/
