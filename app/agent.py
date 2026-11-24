@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageFunctionToolCall
 
-from app.tools import TOOL_DEFINITIONS, execute_tool
+from app.document_evidence import GROUNDING_INSTRUCTION, DocumentEvidence
+from app.tools import DOCUMENT_SEARCH_TOOL, TOOL_DEFINITIONS, execute_tool
 from app.usage import RequestUsage
 
 
@@ -51,8 +52,12 @@ def ask_agent(
     *,
     history: list[dict[str, str]] | None = None,
     usage: RequestUsage | None = None,
+    evidence: DocumentEvidence | None = None,
 ) -> str:
-    messages = [*(history or []), {"role": "user", "content": message}]
+    messages = []
+    if evidence is not None and (history or evidence.documents.has_documents()):
+        messages.append({"role": "system", "content": GROUNDING_INSTRUCTION})
+    messages.extend([*(history or []), {"role": "user", "content": message}])
 
     for round_number in range(MAX_TOOL_ROUNDS + 1):
         try:
@@ -99,10 +104,15 @@ def ask_agent(
             "tool_calls": [call.model_dump(exclude_none=True) for call in calls],
         })
         for call in calls:
+            if evidence is not None and call.function.name == DOCUMENT_SEARCH_TOOL:
+                evidence.searched = True
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.id,
-                "content": execute_tool(call.function.name, call.function.arguments),
+                "content": execute_tool(
+                    call.function.name, call.function.arguments,
+                    document_search=evidence.search if evidence is not None else None,
+                ),
             })
 
     raise InvalidProviderResponse

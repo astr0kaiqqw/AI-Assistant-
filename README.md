@@ -50,7 +50,7 @@ conversations, and the latest reply's usage in the current browser session.
 AI Chat supports Markdown, code, saved conversation switching, and deletion.
 Use Enter to send or Shift+Enter for a new line. Configuration for the model
 stays on the server. Settings lets you choose Dark, Light, or System
-appearance. Documents is marked as planned.
+appearance. The Documents screen remains marked as planned. Use Swagger or the API to manage documents.
 
 ### Context Window monitor
 
@@ -105,6 +105,70 @@ different file (use a `.sqlite3` extension to keep it ignored).
 
 **This API is for local single-user use. Do not expose it publicly without
 authentication and conversation ownership checks.**
+
+## Local document search
+
+Start the backend as shown above and open Swagger at `http://127.0.0.1:8000/docs`.
+The first upload loads the multilingual MiniLM sentence-transformers model on
+CPU and downloads its weights from Hugging Face when they are absent from the
+local cache. The embedding model runs locally. For document content, Gemini
+receives the excerpts selected for the current chat turn.
+
+| Method and path | Behavior |
+| --- | --- |
+| `POST /documents` | Upload PDF or UTF-8 TXT as multipart field `file`. Returns HTTP 201 and document metadata. |
+| `GET /documents` | List documents in the local workspace. Accepts `limit` and `offset`. |
+| `GET /documents/{document_id}` | Inspect metadata, including page count and indexed chunk count. |
+| `GET /documents/search?q=...&top_k=4` | Return ranked excerpts with document ID, name, page and cosine similarity. |
+| `DELETE /documents/{document_id}` | Remove a document, its source file and searchable chunks. Returns HTTP 204. |
+
+Upload files up to 10 MiB. PDFs may contain up to 250 pages and must have
+extractable text. Image-only scans need OCR before upload. Identical file
+contents return HTTP 409, even when renamed. PDF page numbers are 1-based,
+and TXT page numbers are `null`. Search returns an empty list when the
+workspace has no searchable documents. A similarity score describes semantic
+proximity. It is not a probability that an answer is correct.
+
+Original files live under the ignored `.rag-data/` directory, or the directory
+specified by `RAG_STORAGE_DIR`. Keep custom storage outside Git. The same SQLite
+file used for conversations holds document metadata, overlapping chunks and the
+serialized FAISS index. Keep the SQLite file and source directory together
+when moving or backing up the workspace. Deleting a document removes it from
+future retrieval. Answers already saved in chat history retain their text.
+
+Gemini decides when to call `search_documents`. The backend validates the
+arguments, returns bounded excerpts, and resolves the model's citation markers
+to actual document names and pages. Chat responses include optional
+`citations` when sources are used and show source names in `answer` so the
+existing dashboard can display them. When a search yields no usable evidence or
+the model uses invalid markers, chat returns an insufficient-evidence response.
+The server validates source references. The model still interprets the excerpts.
+
+Set `RAG_CONTEXT_TOKEN_BUDGET` to adjust the per-turn retrieved-context budget
+(default `4500`, range `256–50000`). The app uses serialized UTF-8 byte counts
+as a conservative proxy for tokens and caps tool rounds through the existing
+chat limit. Very small budgets may omit whole chunks.
+
+**This is a single-user local workspace. Public deployment requires
+authentication and per-workspace authorization before exposing the endpoints.**
+
+### Manually verify the document flow
+
+1. Make a two-page PDF with a distinctive fact on page 2. For example, use
+   “The Cedar Lantern experiment needs 73 amber tiles.” Upload it in Swagger
+   using **POST /documents** and copy the returned `id`.
+2. Call **GET /documents/{document_id}** to inspect the counts. Search for
+   `Cedar Lantern amber tiles` with **GET /documents/search** and verify the
+   matching excerpt has `page: 2`.
+3. Send `{"message":"Search my uploaded PDF. How many amber tiles does Cedar Lantern need?"}`
+   to **POST /chat**. Verify the answer contains 73 and the citation names your
+   PDF and page 2. Try a question the document cannot answer and check that it
+   reports insufficient evidence. Send a normal chat and the calculator prompt
+   below to check the existing tools.
+4. Stop and restart FastAPI using the same SQLite file and storage directory.
+   Repeat the search and verify the excerpt still appears.
+5. Delete the document using its ID. Repeat the search and verify none of the
+   results belong to that ID. Inspecting the deleted ID should return HTTP 404.
 
 ## Try tool calling in Swagger
 

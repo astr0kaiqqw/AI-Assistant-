@@ -21,10 +21,18 @@ class ChatUsage(BaseModel):
     input_token_limit: int | None
 
 
+class DocumentCitation(BaseModel):
+    reference: str
+    document_id: UUID
+    document_name: str
+    page: int | None
+
+
 class ChatResponse(BaseModel):
     answer: str
     conversation_id: UUID
     usage: ChatUsage | None = None
+    citations: list[DocumentCitation] | None = None
 
 
 class ConversationResponse(BaseModel):
@@ -53,3 +61,25 @@ class MessageResponse(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     created_at: UtcTimestamp
+
+
+class DocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace: str
+    name: str
+    format: str
+    size_bytes: int
+    page_count: int | None
+    chunk_count: int
+    created_at: UtcTimestamp
+
+
+class DocumentHit(BaseModel):
+    chunk_id: int
+    document_id: UUID
+    document_name: str
+    page: int | None
+    text: str
+    score: float

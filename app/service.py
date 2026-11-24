@@ -3,6 +3,7 @@ from uuid import UUID
 from openai import OpenAI
 
 from app.agent import ask_agent
+from app.document_evidence import DocumentEvidence
 from app.repository import ConversationRepository
 from app.usage import RequestUsage
 
@@ -22,6 +23,7 @@ def chat_with_memory(
     model: str,
     *,
     usage: RequestUsage | None = None,
+    evidence: DocumentEvidence | None = None,
 ) -> tuple[str, UUID]:
     history = []
     if conversation_id is not None:
@@ -30,6 +32,8 @@ def chat_with_memory(
         raise ProviderNotConfigured
 
     context = [{"role": entry.role, "content": entry.content} for entry in history]
-    answer = ask_agent(message, client, model, history=context, usage=usage)
+    answer = ask_agent(message, client, model, history=context, usage=usage, evidence=evidence)
+    if evidence is not None:
+        answer, evidence.used_citations = evidence.finalize(answer)
     conversation_id = repository.save_turn(conversation_id, message, answer)
     return answer, conversation_id

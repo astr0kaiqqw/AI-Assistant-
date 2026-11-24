@@ -1,13 +1,15 @@
 import json
+from collections.abc import Callable
 from datetime import datetime
 from math import isfinite
-from typing import Literal
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, StringConstraints
 
 
 DEFAULT_TIMEZONE = "Asia/Almaty"
+DOCUMENT_SEARCH_TOOL = "search_documents"
 
 
 class DivisionByZero(ValueError):
@@ -50,9 +52,20 @@ class CalculatorArguments(ToolArguments):
     operation: Literal["add", "subtract", "multiply", "divide"]
 
 
+class DocumentSearchArguments(ToolArguments):
+    """Search the local workspace for source excerpts. Use for questions about uploaded documents.
+    Ground document claims in returned excerpts and cite their references as [S1], [S2], etc.
+    If the excerpts do not support an answer, reply exactly INSUFFICIENT_DOCUMENT_EVIDENCE.
+    """
+
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+    top_k: Annotated[int, Field(ge=1, le=5)] = 4
+
+
 TOOL_REGISTRY = {
     "get_current_datetime": (get_current_datetime, DateTimeArguments),
     "calculator": (calculator, CalculatorArguments),
+    DOCUMENT_SEARCH_TOOL: (None, DocumentSearchArguments),
 }
 
 TOOL_DEFINITIONS = [
@@ -60,7 +73,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": name,
-            "description": handler.__doc__,
+            "description": handler.__doc__ if handler else arguments.__doc__,
             "parameters": arguments.model_json_schema(),
         },
     }
@@ -68,12 +81,22 @@ TOOL_DEFINITIONS = [
 ]
 
 
-def execute_tool(name: str, arguments: str) -> str:
+def encode_tool_result(result: object) -> str:
+    return json.dumps({"result": result}, ensure_ascii=False, separators=(",", ":"))
+
+
+def execute_tool(
+    name: str, arguments: str, *, document_search: Callable | None = None,
+) -> str:
     tool = TOOL_REGISTRY.get(name)
     if tool is None:
         return json.dumps({"error": "Unknown tool"})
 
     handler, schema = tool
+    if handler is None:
+        if document_search is None:
+            return json.dumps({"error": "Document search is unavailable"})
+        handler = document_search
     try:
         validated = schema.model_validate_json(arguments)
     except ValueError:
@@ -90,4 +113,4 @@ def execute_tool(name: str, arguments: str) -> str:
 
     if isinstance(result, float) and not isfinite(result):
         return json.dumps({"error": "Result is outside the supported numeric range"})
-    return json.dumps({"result": result})
+    return encode_tool_result(result)
