@@ -1,8 +1,8 @@
 # Mini LLM Phase 1
 
 An independent PyTorch experiment in character-level language modeling. All
-model weights start from random initialization. The experiment uses only
-PyTorch and the Python standard library.
+model weights start from random initialization. Training and generation use PyTorch and the Python standard library.
+Stage A uses psutil for process memory and Matplotlib for comparison charts.
 
 ## Setup
 
@@ -75,6 +75,145 @@ The prompt must use characters in the saved vocabulary. Generation samples
 one character at a time and uses at most the last 256 characters with the
 default configuration. Sampling is seeded. The baseline recomputes the
 context each time and has no key-value cache.
+
+## Stage A evaluation and benchmarking
+
+Use an existing checkpoint and the local checksum-verified dataset cache.
+These commands create fresh result directories under
+`mini_llm/evaluations/`. Run each benchmark as its own CLI process.
+
+```sh
+first=$(python -m mini_llm.evaluate mini_llm/runs/RUN_A/checkpoint.pt --device auto)
+python -m mini_llm.benchmark "$first/metrics.json"
+
+second=$(python -m mini_llm.evaluate mini_llm/runs/RUN_B/checkpoint.pt --device auto)
+python -m mini_llm.benchmark "$second/metrics.json"
+
+python -m mini_llm.compare "$first/metrics.json" "$second/metrics.json"
+python -m unittest -v mini_llm.test_evaluation
+```
+
+An evaluation directory contains `metrics.json`, `samples.json`, and
+`benchmark.json` after benchmarking. The comparison command writes
+`comparison.csv` and the available quality, speed, and memory charts in
+`plots/` under a separate timestamped directory. `--output-root` changes
+the evaluation or comparison destination. To rebenchmark with different
+settings, create a new evaluation directory. An existing benchmark is
+preserved. Use `--checkpoint` on the benchmark command if the same checkpoint
+was moved. Its SHA-256 must match the report.
+
+### Validation protocol
+
+The evaluator reconstructs the model and ordered character vocabulary
+from the checkpoint and checks that vocabulary against the one fitted to
+the original training split. It scores the held-out tail in order using
+the original causal next-token objective. Windows have nonoverlapping
+targets. Each window starts with the character immediately before its
+first target and resets positional indices. The final partial window
+is included. The first validation character supplies context only,
+giving 111,539 scored targets for Tiny Shakespeare.
+
+- **Validation loss** is the sum of target negative log-likelihoods in
+  nats divided by the number of scored tokens. The shorter final window
+  contributes in proportion to its target count.
+- **Perplexity** is the exponential of the validation loss and depends
+  on the token units used by the model.
+- **Bits per byte** divides the same total negative log-likelihood by
+  ln(2) and the UTF-8 byte count of the exact scored text. The character
+  tokenizer has a lossless mapping to this text. The first validation
+  character is excluded from both totals.
+
+This is a blockwise full-split score. Context shrinks at block boundaries.
+The sampled validation loss in training logs uses a different protocol.
+The logged training time is the sum of recorded training-step durations
+through the saved step and excludes validation and checkpoint I/O.
+Reports record model and scoring context lengths separately, along with the
+checkpoint, tokenizer and scored-text hashes. Use identical scoring context
+(`--context`, no greater than the smallest checkpoint context) for matched
+character-model comparisons. Keep the fixed prompts, seed, generation
+settings, device and thread count consistent for controlled measurements.
+Defaults are three fixed prompts, 64 new tokens per prompt, temperature
+0.8, top-k 20, and seed 1337 reset for each prompt. Sampling is reproducible
+within a matching execution environment. Device and library changes can
+change numerical results or samples.
+
+### Benchmark protocol
+
+The benchmark reads its prompts and sampling settings from `metrics.json`.
+It runs two warmups and five measured repetitions per prompt by default.
+The report excludes warmups and stores each measured trial and the median
+across all measured prompt-trials.
+Load time is measured once per invocation and includes checkpoint
+deserialization, model construction, weight loading and device transfer.
+The checkpoint is hashed before timing, so load timing can benefit from
+the filesystem cache. The checkpoint size includes optimizer state.
+
+Time to first token starts before prompt encoding and ends when the first
+sampled token ID is ready. Total generation time also includes decoding.
+Throughput divides generated tokens or generated Unicode characters by
+total generation time and excludes the prompt from the numerator. MPS
+synchronizes at timing boundaries. The generation path samples on CPU and
+recomputes context on every token.
+
+Process RSS from psutil is resident process memory. MPS allocated memory
+is the amount held by live PyTorch MPS tensors. Neither is a measurement
+of peak memory or total unified memory usage. Snapshots are taken before
+loading, after loading, after warmup and after each timed trial. The
+comparison shows median post-trial snapshots. CPU reports omit MPS
+measurements and the comparison leaves unavailable values blank.
+
+### Measured Stage A reference
+
+The MPS-trained checkpoint was saved after five smoke-training steps.
+The model has 7,501,120 trainable parameters, six pre-normalized decoder
+blocks, five causal SDPA heads, width 320, 256 positions, and tied input
+and output embeddings. Its character vocabulary has 65 entries. Full-split
+evaluation on MPS scored 111,539 tokens across 111,539 UTF-8 bytes, with
+cross-entropy **3.441037 nats/token**, perplexity **31.2193**, and
+**4.964366 bits/byte**.
+
+Both benchmark columns use that same checkpoint on an Apple M4 with
+16 GB unified memory and PyTorch 2.15.0. Settings were seed 1337,
+temperature 0.8, top-k 20, 64 new tokens per prompt, two warmups and five
+measured repetitions per prompt. The three prompts were `First Citizen:`,
+`ROMEO:`, and `To be, or not to be`.
+
+| Metric | CPU (one thread) | Apple MPS |
+| --- | ---: | ---: |
+| Model load (single measurement) | 105.8 ms | 121.5 ms |
+| First token (median) | 2.38 ms | 2.22 ms |
+| Total generation (median) | 192.95 ms | 145.44 ms |
+| Generated tokens/s (median) | 331.7 | 440.1 |
+| Generated characters/s (median) | 331.7 | 440.1 |
+| Process RSS (median post-trial) | 342.6 MiB | 466.3 MiB |
+| Live MPS tensor allocation (median post-trial) | — | 28.7 MiB |
+| Checkpoint file | 85.9 MiB | 85.9 MiB |
+
+MPS delivered approximately **1.33×** the CPU throughput on this workload.
+Peak memory was not measured. Process RSS and live MPS allocation
+describe separate quantities. The model-load measurement may benefit
+from filesystem caching.
+
+All six Stage A tests passed, including CPU and MPS smoke evaluation.
+A repeated CPU evaluation reproduced the quality metrics and sample JSON
+exactly. Checkpoint hashes remained unchanged. Both available checkpoints
+were trained for five smoke steps. These results establish a pipeline and
+inference performance reference. The full-training quality baseline is pending.
+
+### Before Stage B
+
+Keep the pinned raw corpus and its character split boundary. Fit BPE on the
+training text only, persist its complete tokenizer artifact and fingerprint,
+and extend the checkpoint loader to reconstruct it. Define and verify a
+shared scored UTF-8 span before comparing bits per byte across tokenizers.
+Account explicitly for first-token context, special tokens and byte
+boundaries. Report context in tokens and document how much raw text each
+context covers. For inference, keep prompts and sampling settings fixed
+and record any output-budget difference caused by tokenizer granularity.
+Use characters per second alongside tokens per second. Plan matched
+training budgets and a fully trained character reference before drawing
+quality conclusions. The comparison tool accepts tokenizer identities
+and warns when perplexity or token throughput spans different tokenizers.
 
 ## Architecture and comparison
 
