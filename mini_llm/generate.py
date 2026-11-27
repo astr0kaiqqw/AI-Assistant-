@@ -25,12 +25,14 @@ def load_checkpoint(path, device):
 
 
 @torch.inference_mode()
-def generate(model, tokenizer, prompt, count, temperature, top_k, seed, device) -> str:
+def generate_tokens(model, tokenizer, prompt, count, temperature, top_k, seed, device,
+                    on_first_token=None) -> tuple[list[int], list[int]]:
     tokens = tokenizer.encode(prompt)
     if not tokens:
         raise ValueError("Prompt must contain at least one training-vocabulary character")
     generator = torch.Generator().manual_seed(seed)
-    for _ in range(count):
+    prompt_length = len(tokens)
+    for index in range(count):
         context = torch.tensor([tokens[-model.config.context_length:]], dtype=torch.long, device=device)
         logits, _ = model(context)
         scores = logits[0, -1].cpu()
@@ -40,7 +42,14 @@ def generate(model, tokenizer, prompt, count, temperature, top_k, seed, device) 
         probabilities = ((scores - scores.max()) / temperature).softmax(dim=-1)
         choice = torch.multinomial(probabilities, 1, generator=generator).item()
         tokens.append(choice if top_k is None else candidates[choice].item())
-    return tokenizer.decode(tokens)
+        if index == 0 and on_first_token is not None:
+            on_first_token()
+    return tokens[:prompt_length], tokens[prompt_length:]
+
+
+def generate(model, tokenizer, prompt, count, temperature, top_k, seed, device) -> str:
+    prefix, continuation = generate_tokens(model, tokenizer, prompt, count, temperature, top_k, seed, device)
+    return tokenizer.decode(prefix + continuation)
 
 
 def main() -> None:
