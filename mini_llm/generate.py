@@ -6,7 +6,22 @@ import torch
 
 from mini_llm.data import CharTokenizer
 from mini_llm.model import GPT, ModelConfig
-from mini_llm.runtime import select_device
+from mini_llm.runtime import select_device, synchronize
+
+
+def load_checkpoint(path, device):
+    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+    if checkpoint.get("format_version") != 1 or checkpoint.get("attention") != "causal_sdpa":
+        raise ValueError("Unsupported mini_llm checkpoint format or attention backend")
+    tokenizer = CharTokenizer(checkpoint["vocabulary"])
+    config = ModelConfig(**checkpoint["model_config"])
+    if len(tokenizer.vocabulary) != config.vocab_size:
+        raise ValueError("Checkpoint vocabulary size does not match the model")
+    model = GPT(config)
+    model.load_state_dict(checkpoint["model_state"])
+    model.to(device).eval()
+    synchronize(device)
+    return model, tokenizer, checkpoint["step"]
 
 
 @torch.inference_mode()
@@ -46,16 +61,7 @@ def main() -> None:
     try:
         device = select_device(args.device)
         torch.set_num_threads(1)
-        checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-        if checkpoint.get("format_version") != 1 or checkpoint.get("attention") != "causal_sdpa":
-            raise ValueError("Unsupported mini_llm checkpoint format or attention backend")
-        tokenizer = CharTokenizer(checkpoint["vocabulary"])
-        config = ModelConfig(**checkpoint["model_config"])
-        if len(tokenizer.vocabulary) != config.vocab_size:
-            raise ValueError("Checkpoint vocabulary size does not match the model")
-        model = GPT(config)
-        model.load_state_dict(checkpoint["model_state"])
-        model.to(device).eval()
+        model, tokenizer, _ = load_checkpoint(args.checkpoint, device)
         print(generate(model, tokenizer, args.prompt, args.new_tokens, args.temperature, args.top_k, args.seed, device))
     except (OSError, ValueError) as error:
         parser.exit(1, f"Generation failed: {error}\n")
